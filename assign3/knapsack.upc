@@ -8,10 +8,10 @@
 //
 // Constant Definitions
 //
-//#define CAPACITY    999
-//#define NITEMS      5000
-#define CAPACITY    40
-#define NITEMS      8
+#define CAPACITY    999
+#define NITEMS      5000
+//#define CAPACITY    40
+//#define NITEMS      8
 #define BLK_WIDTH   (CAPACITY+1+THREADS-1) / THREADS
 
 //
@@ -86,7 +86,8 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
                 int* scratch, int* scratch_cnt, int* l_weight, int* l_value)
 {
     // Local variables
-    int i, j, start_col;
+    int i, j;
+    int start_col, scratch_start_col, scratch_end_col;
     int *temp_intptr;
     sintptr_cblk temp_sintptr;
 
@@ -107,8 +108,17 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
     // Iterate through remaining rows
     for(i = 1; i < nitems; i++)
     {
+        // Copy the section of the above row, that we need and that belongs to another thread, to scratch
+        // Note: before using scratch, took 15 seconds
+        scratch_start_col = max(0, start_col - l_weight[i]);
+        scratch_end_col = max(0, start_col - l_weight[i] + BLK_WIDTH);  // end is exclusive
+        //upc_memget(scratch, &s_old_row[scratch_start_col], scratch_end_col - scratch_start_col);
+
+        for(j = scratch_start_col; j < scratch_end_col; j++)
+            scratch[j - scratch_start_col] = s_old_row[j];
+
         // Iterate through all columns belonging to this thread
-        // Note: in each iteration, the last thread does some extra work on non-existent columns
+        // Note: the last thread does some extra work on non-existent columns
         for(j = 0; j < BLK_WIDTH; j++)
         {
             // If this item is larger than the current capacity
@@ -118,7 +128,7 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
             else
             {
                 l_new_row[j] = max( l_old_row[j],
-                                    s_old_row[start_col+j - l_weight[i]] + l_value[i] );  //TODO: copy s_old_row to scratch
+                                    scratch[start_col + j - l_weight[i] - scratch_start_col] + l_value[i] );
             }
         }
 
