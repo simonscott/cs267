@@ -8,11 +8,11 @@
 //
 // Constant Definitions
 //
-#define CAPACITY    999
-#define NITEMS      5000
-//#define CAPACITY    40
-//#define NITEMS      8
-#define BLK_WIDTH   (CAPACITY+1+THREADS-1) / THREADS
+//#define CAPACITY    999
+//#define NITEMS      5000
+#define CAPACITY    20
+#define NITEMS      4
+#define BLK_WIDTH   ((CAPACITY+1+THREADS-1) / THREADS)
 
 //
 // Type Definitions
@@ -45,17 +45,9 @@ double read_timer( )
 //
 //  serial solver to check correctness
 //
-int solve_serial( int nitems, int cap, int *w, int *v )
+int solve_serial( int nitems, int cap, int *w, int *v, int* T )
 {
-    int i, j, best, *allocated, *T, wj, vj;
-    
-    //alloc local resources
-    T = allocated = malloc( nitems*(cap+1)*sizeof(int) );
-    if( !allocated )
-    {
-        fprintf( stderr, "Failed to allocate memory" );
-        upc_global_exit( -1 );
-    }
+    int i, j, best, wj, vj;
     
     //build_table locally
     wj = w[0];
@@ -72,33 +64,78 @@ int solve_serial( int nitems, int cap, int *w, int *v )
     }
     best = T[cap];
     
-    //free resources
-    free( allocated );
-    
     return best;
+}
+
+void backtrack_serial( int nitems, int cap, int *T, int *w, int *u )
+{
+    int i, j;
+    
+    i = nitems*(cap+1) - 1;
+    for( j = nitems-1; j > 0; j-- )
+    {
+        u[j] = T[i] != T[i-cap-1];
+        i -= cap+1 + (u[j] ? w[j] : 0 );
+    }
+    u[0] = T[i] != 0;
+}
+
+void compute_serial(int nitems, int cap, int *w, int *v, 
+                    int* nused, int* weight, int* value){
+    //alloc local resources
+    int* T = malloc( nitems*(cap+1)*sizeof(int) );
+    int* used = malloc( nitems*sizeof(int) );
+    if( !T )
+    {
+        fprintf( stderr, "Failed to allocate memory" );
+        upc_global_exit( -1 );
+    }
+
+    *value = solve_serial(nitems, cap, w, v, T);
+    backtrack_serial(nitems, cap, T, w, used);
+
+    // Determine total weight and value, and num items used, by iterating through UPC output array
+    *weight = 0; 
+    *nused = 0;
+    for( int i = 0; i < nitems; i++ )
+    {
+        if( used[i] )
+        {
+            (*nused)++;
+            *weight += w[i];
+        }
+    }
 }
 
 
 //
 // Solves the knapsack problem using shared memory
 //
-int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_row, sintptr_cblk s_count, int* l_old_row, int* l_new_row, int* l_count,
-                int* scratch, int* scratch_cnt, int* l_weight, int* l_value)
+int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_row, sintptr_cblk s_old_cnt,
+                sintptr_cblk s_new_cnt, int* l_old_row, int* l_new_row, int* l_old_cnt, int* l_new_cnt,
+                int* scratch, int* scratch_cnt, int* l_weight, int* l_value, int* nused, int* total_weight)
 {
     // Local variables
     int i, j;
-    int start_col, scratch_start_col, scratch_end_col;
+    int start_col, scratch_start_col, scratch_end_col, boundary_col;
     int *temp_intptr;
+    int value_with_item;
     sintptr_cblk temp_sintptr;
 
     // Intialize first row
     int val_item0 = l_value[0];
 
     upc_forall(i = 0; i < l_weight[0]; i++; &s_old_row[i])
+    {
         s_old_row[i] = 0;
+        s_old_cnt[i] = 0;
+    }
 
     upc_forall(i = l_weight[0]; i < cap+1; i++; &s_old_row[i])
+    {
         s_old_row[i] = val_item0;
+        s_old_cnt[i] = 1;
+    }
 
     upc_barrier;
 
@@ -112,10 +149,13 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
         // Note: before using scratch, took 15 seconds
         scratch_start_col = max(0, start_col - l_weight[i]);
         scratch_end_col = max(0, start_col - l_weight[i] + BLK_WIDTH);  // end is exclusive
-        //upc_memget(scratch, &s_old_row[scratch_start_col], scratch_end_col - scratch_start_col);
+        boundary_col = min( (scratch_start_col / BLK_WIDTH + 1) * BLK_WIDTH, scratch_end_col );
 
-        for(j = scratch_start_col; j < scratch_end_col; j++)
-            scratch[j - scratch_start_col] = s_old_row[j];
+        upc_memget(scratch, &s_old_row[scratch_start_col], (boundary_col - scratch_start_col)*sizeof(int));
+        upc_memget(&scratch[boundary_col - scratch_start_col], &s_old_row[boundary_col], (scratch_end_col - boundary_col)*sizeof(int));
+
+        upc_memget(scratch_cnt, &s_old_cnt[scratch_start_col], (boundary_col - scratch_start_col)*sizeof(int));
+        upc_memget(&scratch_cnt[boundary_col - scratch_start_col], &s_old_cnt[boundary_col], (scratch_end_col - boundary_col)*sizeof(int));
 
         // Iterate through all columns belonging to this thread
         // Note: the last thread does some extra work on non-existent columns
@@ -123,12 +163,27 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
         {
             // If this item is larger than the current capacity
             if(start_col + j < l_weight[i])
+            {
                 l_new_row[j] = l_old_row[j];
+                l_new_cnt[j] = l_old_cnt[j];
+            }
 
             else
             {
-                l_new_row[j] = max( l_old_row[j],
-                                    scratch[start_col + j - l_weight[i] - scratch_start_col] + l_value[i] );
+                value_with_item = scratch[start_col + j - l_weight[i] - scratch_start_col] + l_value[i];
+
+                // If not using the item
+                if(l_old_row[j] >= value_with_item)
+                {
+                    l_new_row[j] = l_old_row[j];
+                    l_new_cnt[j] = l_old_cnt[j];
+                }
+                // Else if using the item
+                else
+                {
+                    l_new_row[j] = value_with_item;
+                    l_new_cnt[j] = scratch_cnt[start_col + j - l_weight[i] - scratch_start_col] + 1;
+                }
             }
         }
 
@@ -144,11 +199,34 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
         s_old_row = s_new_row;
         s_new_row = temp_sintptr;
 
-        // Sync all threads (is this needed?)
-        upc_barrier;
+        temp_intptr = l_old_cnt;
+        l_old_cnt = l_new_cnt;
+        l_new_cnt = temp_intptr;
+
+        temp_sintptr = s_old_cnt;
+        s_old_cnt = s_new_cnt;
+        s_new_cnt = temp_sintptr;
     }
 
-    return s_old_row[cap]; //can we optimize this access?
+    // Return results
+    if(MYTHREAD == 0)
+    {
+        *nused = s_old_cnt[cap];
+        *total_weight = 0;
+
+        for(i = 0; i < CAPACITY+1; i++)
+            printf("%d ", s_old_row[i]);
+        printf("\n");
+
+        for(i = 0; i < CAPACITY+1; i++)
+            printf("%d ", s_old_cnt[i]);
+        printf("\n");
+
+        return s_old_row[cap];
+    }
+
+    else
+        return 0;
 }
 
 
@@ -158,7 +236,7 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
 int main( int argc, char** argv )
 {
     // Local variables
-    int i, best_value, best_value_serial, total_weight, nused, total_value;
+    int i, best_value, best_value_serial, total_weight, serial_total_weight, nused, nused_serial;
     double seconds;
     
     // Local arrays
@@ -174,14 +252,16 @@ int main( int argc, char** argv )
     sintptr_nblk s_value;
     sintptr_cblk s_old_row;
     sintptr_cblk s_new_row;
-    sintptr_cblk s_count;
+    sintptr_cblk s_old_cnt;
+    sintptr_cblk s_new_cnt;
 
     // Local pointers to shared memory
     int *l_weight;
     int *l_value;
     int *l_old_row;
     int *l_new_row;
-    int *l_count;
+    int *l_old_cnt;
+    int *l_new_cnt;
 
     // Allocate shared memory arrays
     // Separate copies of weight and value are provided for each thread
@@ -189,9 +269,10 @@ int main( int argc, char** argv )
     s_value     = (sintptr_nblk) upc_all_alloc( THREADS, NITEMS * sizeof(int) );
     s_old_row   = (sintptr_cblk) upc_all_alloc( THREADS, BLK_WIDTH * sizeof(int) );
     s_new_row   = (sintptr_cblk) upc_all_alloc( THREADS, BLK_WIDTH * sizeof(int) );
-    s_count     = (sintptr_cblk) upc_all_alloc( THREADS, BLK_WIDTH * sizeof(int) );
+    s_old_cnt   = (sintptr_cblk) upc_all_alloc( THREADS, BLK_WIDTH * sizeof(int) );
+    s_new_cnt   = (sintptr_cblk) upc_all_alloc( THREADS, BLK_WIDTH * sizeof(int) );
 
-    if( !s_weight || !s_value || !s_old_row || !s_new_row || !s_count )
+    if( !s_weight || !s_value || !s_old_row || !s_new_row || !s_old_cnt || !s_new_cnt )
     {
         fprintf( stderr, "Failed to allocate shared memory\n" );
         upc_global_exit( -1 );
@@ -213,7 +294,8 @@ int main( int argc, char** argv )
     l_value     = (int*)( s_value + (MYTHREAD * NITEMS) );
     l_old_row   = (int*)( s_old_row + (MYTHREAD * BLK_WIDTH) );
     l_new_row   = (int*)( s_new_row + (MYTHREAD * BLK_WIDTH) );
-    l_count     = (int*)( s_count + (MYTHREAD * BLK_WIDTH) );
+    l_old_cnt   = (int*)( s_old_cnt + (MYTHREAD * BLK_WIDTH) );
+    l_new_cnt   = (int*)( s_new_cnt + (MYTHREAD * BLK_WIDTH) );
     
     // Random initialization
     srand48( (unsigned int)time(NULL) );
@@ -245,45 +327,29 @@ int main( int argc, char** argv )
     
     // Actually solve the knapsack problem
     // Must return best_value, and populate s_count array correctly
-    best_value = solve_upc(NITEMS, CAPACITY, s_old_row, s_new_row, s_count, l_old_row, l_new_row, l_count, scratch, scratch_cnt, l_weight, l_value);
+    best_value = solve_upc(NITEMS, CAPACITY, s_old_row, s_new_row, s_old_cnt, s_new_cnt, l_old_row, l_new_row,
+                            l_old_cnt, l_new_cnt, scratch, scratch_cnt, l_weight, l_value, &nused, &total_weight);
 
     seconds = read_timer() - seconds;
     
     // Check the result against the serial code
     if( MYTHREAD == 0 )
     {
-        // Debug output
-        for(int i = 0; i < CAPACITY+1; i++)
-        {
-            printf("[%d] owned by THREAD %d\n", i, upc_threadof(&s_count[i]));
-        }
-
         // Print problems parameters
         printf( "%d items, capacity: %d, time: %g\n", NITEMS, CAPACITY, seconds );
         
-        best_value_serial = solve_serial( NITEMS, CAPACITY, l_weight, l_value );
+        compute_serial(NITEMS, CAPACITY, l_weight, l_value, &nused_serial, &serial_total_weight, &best_value_serial);
         
-        printf("Serial best value=%d. UPC best value=%d\n", best_value_serial, best_value);
-
-        // Determine total weight and value, and num items used, by iterating through UPC output array
-        total_weight = nused = total_value = 0;
-        for( i = 0; i < NITEMS; i++ )
-        {
-            if( s_count[i] != 0 )
-            {
-                nused++;
-                total_weight += s_weight[i];
-                total_value += s_value[i];
-            }
-        }
+        printf("Serial: %d items used, value %d, weight %d\n", nused, best_value_serial, serial_total_weight );
         
         // Print UPC solution
-        printf( "%d items used, value %d, weight %d\n", nused, total_value, total_weight );
+        printf( "%d items used, value %d, weight %d\n", nused, best_value, total_weight );
         
         // If different, print error message
-        if( best_value != best_value_serial || best_value != total_value || total_weight > CAPACITY )
+        if( best_value != best_value_serial || nused != nused_serial || total_weight != serial_total_weight )
             printf( "WRONG SOLUTION\n" );
     
+
         // Free up allocated shared memory
 /*        upc_free(s_weight);
         upc_free(s_value);
