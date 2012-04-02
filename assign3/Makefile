@@ -4,7 +4,7 @@
 CC = CC -O3
 UPCC = cc -h upc -O
 # If you change this, also change the mppwidth parameter in "job-knapsack-race" accordingly
-NTHREADS = 4
+NTHREADS = 8
 
 TARGETS=serial knapsack-race knapsack
 

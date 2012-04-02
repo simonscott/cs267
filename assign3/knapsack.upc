@@ -8,10 +8,10 @@
 //
 // Constant Definitions
 //
-//#define CAPACITY    999
-//#define NITEMS      5000
-#define CAPACITY    20
-#define NITEMS      4
+#define CAPACITY    31999
+#define NITEMS      16000
+//#define CAPACITY    20
+//#define NITEMS      4
 #define BLK_WIDTH   ((CAPACITY+1+THREADS-1) / THREADS)
 
 //
@@ -119,7 +119,7 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
     int i, j;
     int start_col, scratch_start_col, scratch_end_col, boundary_col;
     int *temp_intptr;
-    int value_with_item;
+    int value_with_item, cnt_with_item;
     sintptr_cblk temp_sintptr;
 
     // Intialize first row
@@ -148,15 +148,24 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
         // Copy the section of the above row, that we need and that belongs to another thread, to scratch
         // Note: before using scratch, took 15 seconds
         scratch_start_col = max(0, start_col - l_weight[i]);
-        scratch_end_col = max(0, start_col - l_weight[i] + BLK_WIDTH);  // end is exclusive
+        scratch_end_col = min( max(0, start_col - l_weight[i] + BLK_WIDTH) , start_col);  // end is exclusive
         boundary_col = min( (scratch_start_col / BLK_WIDTH + 1) * BLK_WIDTH, scratch_end_col );
+
+//        for(j=scratch_start_col; j < scratch_end_col; j++)
+//            scratch[j-scratch_start_col] = s_old_row[j];
 
         upc_memget(scratch, &s_old_row[scratch_start_col], (boundary_col - scratch_start_col)*sizeof(int));
         upc_memget(&scratch[boundary_col - scratch_start_col], &s_old_row[boundary_col], (scratch_end_col - boundary_col)*sizeof(int));
 
         upc_memget(scratch_cnt, &s_old_cnt[scratch_start_col], (boundary_col - scratch_start_col)*sizeof(int));
         upc_memget(&scratch_cnt[boundary_col - scratch_start_col], &s_old_cnt[boundary_col], (scratch_end_col - boundary_col)*sizeof(int));
+/*
+        upc_memget(scratch, &s_old_row[scratch_start_col], 1*sizeof(int));
+        upc_memget(&scratch[boundary_col - scratch_start_col], &s_old_row[boundary_col], 1*sizeof(int));
 
+        upc_memget(scratch_cnt, &s_old_cnt[scratch_start_col], 1*sizeof(int));
+        upc_memget(&scratch_cnt[boundary_col - scratch_start_col], &s_old_cnt[boundary_col], 1*sizeof(int));
+*/
         // Iterate through all columns belonging to this thread
         // Note: the last thread does some extra work on non-existent columns
         for(j = 0; j < BLK_WIDTH; j++)
@@ -170,7 +179,16 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
 
             else
             {
-                value_with_item = scratch[start_col + j - l_weight[i] - scratch_start_col] + l_value[i];
+                if(j - l_weight[i] < 0)
+                {
+                    value_with_item = scratch[start_col + j - l_weight[i] - scratch_start_col] + l_value[i];
+                    cnt_with_item = scratch_cnt[start_col + j - l_weight[i] - scratch_start_col] + 1;
+                }
+                else
+                {
+                    value_with_item = l_old_row[j - l_weight[i]] + l_value[i];
+                    cnt_with_item = l_old_cnt[j - l_weight[i]] + 1;
+                }
 
                 // If not using the item
                 if(l_old_row[j] >= value_with_item)
@@ -182,7 +200,7 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
                 else
                 {
                     l_new_row[j] = value_with_item;
-                    l_new_cnt[j] = scratch_cnt[start_col + j - l_weight[i] - scratch_start_col] + 1;
+                    l_new_cnt[j] = cnt_with_item;
                 }
             }
         }
@@ -208,20 +226,31 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
         s_new_cnt = temp_sintptr;
     }
 
+    // Calculate total weight
+    if(MYTHREAD == THREADS-1)
+    {
+        *total_weight = -1;
+
+        for(i = CAPACITY; i > 0; i--)
+        {
+            if(s_old_row[i] != s_old_row[i-1])
+            {
+                *total_weight = i;
+                break;
+            }
+        }
+
+        // Transfer weight from last thread to first
+        s_new_cnt[0] = *total_weight;   
+    }
+
+    upc_barrier;
+
     // Return results
     if(MYTHREAD == 0)
     {
         *nused = s_old_cnt[cap];
-        *total_weight = 0;
-
-        for(i = 0; i < CAPACITY+1; i++)
-            printf("%d ", s_old_row[i]);
-        printf("\n");
-
-        for(i = 0; i < CAPACITY+1; i++)
-            printf("%d ", s_old_cnt[i]);
-        printf("\n");
-
+        *total_weight = s_new_cnt[0];
         return s_old_row[cap];
     }
 
@@ -311,6 +340,8 @@ int main( int argc, char** argv )
         }
     }
 
+    upc_barrier;
+
     // Now copy the randomixed weights and values to the different processors
     if( MYTHREAD != 0 )
     {
@@ -322,6 +353,8 @@ int main( int argc, char** argv )
         }
     }
     
+    upc_barrier;
+
     // time the solution
     seconds = read_timer();
     
