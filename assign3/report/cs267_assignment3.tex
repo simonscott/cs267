@@ -31,6 +31,7 @@
 \usepackage{subfig} % make it possible to include more than one captioned figure/table in a single float
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{listings}
 % These packages are all incorporated in the memoir class to one degree or another...
 
 %%% HEADERS & FOOTERS
@@ -65,8 +66,101 @@
 \parskip 7.2pt
 
 \section{Introduction and Aims}
+The aim of this assignment was to 
+\begin{enumerate}
+  \item find and fix the race condition in the supplied implementation of knapsack using Thrille
+  \item develop a correct parallel implementation of dynamic programming to solve the 0-1 knapsack problem that demonstrates weak and strong scaling.
+\end{enumerate}
 
-The aim of this assignment was ...
+\section{Debugging using Thrille}
+\subsection{Detected Race Condition}
+{\tiny
+\begin{lstlisting}
+UPCR: UPC thread 0 of 4 on nid12594 (process 0 of 4, pid=27595)
+UPCR: UPC thread 3 of 4 on nid12597 (process 3 of 4, pid=27135)
+UPCR: UPC thread 2 of 4 on nid12596 (process 2 of 4, pid=27623)
+UPCR: UPC thread 1 of 4 on nid12595 (process 1 of 4, pid=27581)
+Initializing Race Detection 0.9.18 (BACK_OFF=0.95, EPS=4.65661e-10)...
+[0] Potential race #1 found:
+[0] Read from [0x3df4000,0x3df4004) by thread 1 at phase 0 
+    (knapsack-race.upc:34:upcr_addrfield_pshared(v)+(0)@0x5127a0)
+[0] Write to [0x3df4000,0x3df4004) by thread 0 at phase 0 
+    (knapsack-race.upc:143:upcr_addrfield_pshared(_bupc_Mptra67)+(0)@0x512f80)
+[0] Potential race #2 found:
+[0] Read from [0x3df6000,0x3df6004) by thread 1 at phase 0 
+    (knapsack-race.upc:33:upcr_addrfield_pshared(w)+(0)@0x512768)
+[0] Write to [0x3df6000,0x3df6004) by thread 0 at phase 0 
+    (knapsack-race.upc:142:upcr_addrfield_pshared(_bupc_Mptra66)+(0)@0x512f40)
+[2] Local shared reads: 0 / writes: 0
+<>[1] Local shared reads: 0 / writes: 0
+<>[3] Local shared reads: 0 / writes: 0
+<>5000 items, capacity: 999, time: 8.79658
+82 items used, value 53454, weight 999
+Exiting Race Detection 0.9.18...
+[0] Local shared reads: 0 / writes: 0
+\end{lstlisting}
+}
+
+\subsection*{knapsack-race.upc:143}
+{\tiny
+\begin{lstlisting}
+max_weight = min( max_weight, capacity );
+upc_forall( i = 0; i < nitems; i++; i )
+{
+   weight[i] = 1 + (lrand48()%max_weight); <- WRITE
+   value[i]  = 1 + (lrand48()%max_value);  <- WRITE
+}
+\end{lstlisting}
+}
+
+\subsection*{knapsack-race.upc:33 in build\_table}
+{\tiny
+\begin{lstlisting}
+wj = w[0]; <- READ
+vj = v[0]; <- READ
+upc_forall( int i = 0;  i <  wj;  i++; &T[i] ) T[i] = 0;
+upc_forall( int i = wj; i <= cap; i++; &T[i] ) T[i] = vj;
+\end{lstlisting}
+}
+
+\subsection{Explanation of Race Condition}
+
+In build\_table, each thread incrementally reads from the weight and value array, starting from the first element, in order to build the T table, one row at a time. However, this assumes (incorrectly) that the weight and value array has been properly initialized. weight[0] and value[0] is initialized by thread 0 (MYTHREAD == 0). Incorrect behavior results from thread 1 reads from weight[0] and value[0] before they are initialized by thread 0.
+
+\subsection{Fix for Race Condition}
+We can prevent the race condition by using a upc\_barrier statement to ensure that the weight and value array is initialized before calling build\_table. 
+
+{\tiny
+\begin{lstlisting}
+max_weight = min( max_weight, capacity );
+upc_forall( i = 0; i < nitems; i++; i )
+{
+   weight[i] = 1 + (lrand48()%max_weight);
+   value[i]  = 1 + (lrand48()%max_value);
+}
+upc_barrier; //Wait for initialization to complete
+\end{lstlisting}
+}
+
+\subsection{No More Detected Races}
+Running Thrille on the fixed source results in no more detected race conditions.
+
+{\tiny
+\begin{lstlisting}
+UPCR: UPC thread 0 of 4 on nid02346 (process 0 of 4, pid=11575)
+UPCR: UPC thread 3 of 4 on nid02349 (process 3 of 4, pid=11584)
+UPCR: UPC thread 2 of 4 on nid02348 (process 2 of 4, pid=11581)
+UPCR: UPC thread 1 of 4 on nid02347 (process 1 of 4, pid=11578)
+Initializing Race Detection 0.9.18 (BACK_OFF=0.95, EPS=4.65661e-10)...
+[2] Local shared reads: 0 / writes: 0
+<>[3] Local shared reads: 0 / writes: 0
+<>[1] Local shared reads: 0 / writes: 0
+<>5000 items, capacity: 999, time: 8.58934
+75 items used, value 52721, weight 997
+Exiting Race Detection 0.9.18...
+[0] Local shared reads: 0 / writes: 0
+\end{lstlisting}
+}
 
 \section{Method of Parallelization}
 
@@ -75,13 +169,17 @@ How we parallelized the code. We blocked the columns, with each processor having
 \section{Optimization Techniques}
 
 \subsection{Only Store Two Rows}
+A straightforward implementation of dynamic programming to solve the 0-1 knapsack problem constructs and populates a NITEMS $\times$ CAPACITY table, $T$. After populating $T$, the optimal value is found at $T[\text{NITEMS}, \text{CAPACITY}]$. To find the subset of items contained in the knapsack we backtrack along the rows of the table and determine whether each item was included in the knapsack. 
 
-Saves memory and makes accessing memory easier.
+We are interested only in the total weight, value, and the final number of items in the table, and \emph{not} the actual subset of items that were used. Hence, we can save some memory by not storing the entire $T$ table. At any time we only need to store 2 rows of the table, the current row that we are calculating, and the previous row, on which the current row depends on.
 
 \subsection{Elimination of Backtracking}
 
-Count array to get total count.
-Searching for change in value to get weight.
+Because the $T$ table is no longer being stored, we can no longer backtrack along the rows of $T$ to determine the final number of items in the knapsack. Instead, we keep track of the number of items used for each weight in a separate 1$\times$C array, \emph{count}. We update \emph{count} during the calculation of $T$. For each item $i$, we may choose to either include it in the knapsack, at which time \emph{count}$_i$ is incremented, or we may choose to exclude it from knapsack, keeping \emph{count}$_i$ is unmodified. 
+
+To compute the final weight in the knapsack, we look in the last row of $T$ for the last column at which an item was added to the knapsack. I.e. we look for the largest weight i, at which $T[\text{NITEMS}, i] > T[\text{NITEMS}, i-1]$.
+
+With the above two modifications to the original implementation, we avoid the backtracking phase of the computation.
 
 \subsection{Bulk Memory Copies}
 

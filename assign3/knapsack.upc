@@ -10,7 +10,7 @@
 //
 // Constant Definitions
 //
-#define CAPACITY    63999
+#define CAPACITY    1999
 #define NITEMS      16000
 
 #define BLK_WIDTH   ((CAPACITY+1+THREADS-1) / THREADS)
