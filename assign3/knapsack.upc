@@ -4,6 +4,8 @@
 #include <sys/time.h>
 #include <upc.h>
 
+//#pragma upc strict
+
 
 //
 // Constant Definitions
@@ -19,7 +21,7 @@
 //    
 typedef shared [BLK_WIDTH]  int* sintptr_cblk;
 typedef shared [NITEMS]     int* sintptr_nblk;
-
+typedef volatile strict shared [1] int* sintptr_sngl;
 
 //
 // auxiliary functions
@@ -113,7 +115,8 @@ void compute_serial(int nitems, int cap, int *w, int *v,
 //
 int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_row, sintptr_cblk s_old_cnt,
                 sintptr_cblk s_new_cnt, int* l_old_row, int* l_new_row, int* l_old_cnt, int* l_new_cnt,
-                int* scratch, int* scratch_cnt, int* l_weight, int* l_value, int* nused, int* total_weight)
+                int* scratch, int* scratch_cnt, int* l_weight, int* l_value, int* nused, int* total_weight,
+                sintptr_sngl s_progress)
 {
     // Local variables
     int i, j;
@@ -136,6 +139,8 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
         s_old_row[i] = val_item0;
         s_old_cnt[i] = 1;
     }
+
+    s_progress[MYTHREAD] = 0;
 
     upc_barrier;
 
@@ -205,8 +210,28 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
             }
         }
 
+        s_progress[MYTHREAD] = i;
+
         // Sync all threads
-        upc_barrier;
+        //upc_barrier;
+        if(i == nitems - 1)
+            upc_barrier;
+        else
+        {
+            scratch_start_col = max(0, start_col - l_weight[i+1]);
+            scratch_end_col = min( max(0, start_col - l_weight[i+1] + BLK_WIDTH) , start_col);  // end is exclusive
+            int dep_start_col = start_col + l_weight[i];
+            int dep_end_col = (dep_start_col + BLK_WIDTH);  // end is exclusive
+
+            int t1 = scratch_start_col / BLK_WIDTH;
+            int t2 = max(0, (scratch_end_col - 1) / BLK_WIDTH);
+            int t3 = min(THREADS-1, dep_start_col / BLK_WIDTH);
+            int t4 = min(THREADS-1, (dep_end_col - 1) / BLK_WIDTH);
+            while(s_progress[t1] < i) ;
+            while(s_progress[t2] < i) ;
+            while(s_progress[t3] < i) ;
+            while(s_progress[t4] < i) ;
+        }
 
         // Swap new and old rows
         temp_intptr = l_old_row;
@@ -283,6 +308,7 @@ int main( int argc, char** argv )
     sintptr_cblk s_new_row;
     sintptr_cblk s_old_cnt;
     sintptr_cblk s_new_cnt;
+    sintptr_sngl s_progress;
 
     // Local pointers to shared memory
     int *l_weight;
@@ -300,8 +326,9 @@ int main( int argc, char** argv )
     s_new_row   = (sintptr_cblk) upc_all_alloc( THREADS, BLK_WIDTH * sizeof(int) );
     s_old_cnt   = (sintptr_cblk) upc_all_alloc( THREADS, BLK_WIDTH * sizeof(int) );
     s_new_cnt   = (sintptr_cblk) upc_all_alloc( THREADS, BLK_WIDTH * sizeof(int) );
+    s_progress  = (sintptr_sngl) upc_all_alloc( THREADS, sizeof(int) );
 
-    if( !s_weight || !s_value || !s_old_row || !s_new_row || !s_old_cnt || !s_new_cnt )
+    if( !s_weight || !s_value || !s_old_row || !s_new_row || !s_old_cnt || !s_new_cnt || !s_progress)
     {
         fprintf( stderr, "Failed to allocate shared memory\n" );
         upc_global_exit( -1 );
@@ -361,7 +388,8 @@ int main( int argc, char** argv )
     // Actually solve the knapsack problem
     // Must return best_value, and populate s_count array correctly
     best_value = solve_upc(NITEMS, CAPACITY, s_old_row, s_new_row, s_old_cnt, s_new_cnt, l_old_row, l_new_row,
-                            l_old_cnt, l_new_cnt, scratch, scratch_cnt, l_weight, l_value, &nused, &total_weight);
+                            l_old_cnt, l_new_cnt, scratch, scratch_cnt, l_weight, l_value, &nused,
+                            &total_weight, s_progress);
 
     seconds = read_timer() - seconds;
     
@@ -384,12 +412,12 @@ int main( int argc, char** argv )
     
 
         // Free up allocated shared memory
-/*        upc_free(s_weight);
+        upc_free(s_weight);
         upc_free(s_value);
         upc_free(s_old_row);
         upc_free(s_new_row);
-        upc_free(s_count);
-*/
+        upc_free(s_old_cnt);
+        upc_free(s_new_cnt);
     }
     
     // Free up allocated local memory
