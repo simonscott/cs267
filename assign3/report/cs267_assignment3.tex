@@ -1,0 +1,122 @@
+% !TEX TS-program = pdflatex
+% !TEX encoding = UTF-8 Unicode
+
+% This is a simple template for a LaTeX document using the "article" class.
+% See "book", "report", "letter" for other types of document.
+
+\documentclass[11pt]{article} % use larger type; default would be 10pt
+
+\usepackage[utf8]{inputenc} % set input encoding (not needed with XeLaTeX)
+
+%%% Examples of Article customizations
+% These packages are optional, depending whether you want the features they provide.
+% See the LaTeX Companion or other references for full information.
+
+%%% PAGE DIMENSIONS
+\usepackage{geometry} % to change the page dimensions
+\geometry{letterpaper} % or letterpaper (US) or a5paper or....
+% \geometry{margins=2in} % for example, change the margins to 2 inches all round
+% \geometry{landscape} % set up the page for landscape
+%   read geometry.pdf for detailed page layout information
+
+\usepackage{graphicx} % support the \includegraphics command and options
+
+% \usepackage[parfill]{parskip} % Activate to begin paragraphs with an empty line rather than an indent
+
+%%% PACKAGES
+\usepackage{booktabs} % for much better looking tables
+\usepackage{array} % for better arrays (eg matrices) in maths
+\usepackage{paralist} % very flexible & customisable lists (eg. enumerate/itemize, etc.)
+\usepackage{verbatim} % adds environment for commenting out blocks of text & for better verbatim
+\usepackage{subfig} % make it possible to include more than one captioned figure/table in a single float
+\usepackage{amsmath}
+\usepackage{amssymb}
+% These packages are all incorporated in the memoir class to one degree or another...
+
+%%% HEADERS & FOOTERS
+\usepackage{fancyhdr} % This should be set AFTER setting up the page geometry
+\pagestyle{fancy} % options: empty , plain , fancy
+\renewcommand{\headrulewidth}{0pt} % customise the layout...
+\lhead{}\chead{}\rhead{}
+\lfoot{}\cfoot{\thepage}\rfoot{}
+
+%%% SECTION TITLE APPEARANCE
+\usepackage{sectsty}
+\allsectionsfont{\sffamily\mdseries\upshape} % (See the fntguide.pdf for font help)
+% (This matches ConTeXt defaults)
+
+%%% ToC (table of contents) APPEARANCE
+\usepackage[nottoc,notlof,notlot]{tocbibind} % Put the bibliography in the ToC
+\usepackage[titles,subfigure]{tocloft} % Alter the style of the Table of Contents
+\renewcommand{\cftsecfont}{\rmfamily\mdseries\upshape}
+\renewcommand{\cftsecpagefont}{\rmfamily\mdseries\upshape} % No bold!
+
+%%% END Article customizations
+
+%%% The "real" document content comes below...
+
+\title{CS267 Assignment 3}
+\author{Patrick Li, Simon Scott}
+%\date{} % Activate to display a given date or no date (if empty),
+         % otherwise the current date is printed 
+
+\begin{document}
+\maketitle
+\parskip 7.2pt
+
+\section{Introduction and Aims}
+
+The aim of this assignment was ...
+
+\section{Method of Parallelization}
+
+How we parallelized the code. We blocked the columns, with each processor having single set of adjacent columns. Synchronize after each row.
+
+\section{Optimization Techniques}
+
+\subsection{Only Store Two Rows}
+
+Saves memory and makes accessing memory easier.
+
+\subsection{Elimination of Backtracking}
+
+Count array to get total count.
+Searching for change in value to get weight.
+
+\subsection{Bulk Memory Copies}
+
+memget, rather than reading each element separately.
+
+\subsection{Synchronizing via Spin-Locks}
+
+Use progress array as spin-lock to avoid costly upc\_barrier operation. Lock must be declared volatile.
+
+\section{Results}
+
+\subsection{Strong Scaling}
+
+How does time vary with number of processors, for fixed global problem size. Show figure 1, and explain.
+
+\subsection{Weak Scaling}
+
+How does solution time vary with number of processors, for fixed per-processor problem size. Show figure 3, and explain.
+
+\subsection{Time versus Problem Size}
+
+How does solution time vary for fixed number of processors, when problem sized increased. Shows figure 2, and explain.
+
+\subsection{Effect of Optimizations on Performance}
+
+\subsubsection{Bulk Memory Copies}
+
+Give \% speed increase for a single P, C, N combination.
+
+\subsubsection{Synchronizing via Spin-Locks}
+
+Give \% speed increase for a single P, C, N combination.
+
+\section{Conclusion}
+
+TODO
+
+\end{document}
