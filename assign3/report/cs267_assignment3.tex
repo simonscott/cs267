@@ -164,7 +164,7 @@ Exiting Race Detection 0.9.18...
 
 \section{Method of Parallelization}
 
-The dynamic programming matrix, \emph{T}, has NITEMS rows and CAPACITY columns. This matrix is computed in parallel by allocating NITEMS/\emph{P} adjacent columns, to each processor, where \emph{P} is the number of processors. Therefore, non-cyclic column blocking is used to partition the array.
+The dynamic programming matrix, \emph{T}, has NITEMS (N) rows and CAPACITY (C) columns. This matrix is computed in parallel by allocating NITEMS/\emph{P} adjacent columns, to each processor, where \emph{P} is the number of processors. Therefore, non-cyclic column blocking is used to partition the array.
 
 Since each element in the table is dependent on two values in the row immediately above it, the threads are synchronized after computing each row.
 
@@ -185,7 +185,7 @@ With the above two modifications to the original implementation, we avoid the ba
 
 \subsection{Bulk Memory Copies}
 
-To compute each element in the dynamic programming matrix, the algorithm must take the maximum of two values in the row above. The one element is directly above, while the other is above and to the left. In Figure~\ref{memcpy_diagram}, the yellow element in \emph{Row i} is dependent on the two yellow elements in \emph{Row i-1}. Furthermore, adjacent elements in the current row (the blue items in the figure) are dependent on the elements directly above (the red elements) and an \emph{adjacent} set of elements to left (the green elements). The red elements are stored on the current processor, while the green elements are stored on 1 or 2 other processors.
+To compute each element in the dynamic programming matrix, the algorithm must take the maximum of two values in the row above. One element is directly above, while the other is above and to the left. In Figure~\ref{memcpy_diagram}, the yellow element in \emph{Row i} is dependent on the two yellow elements in \emph{Row i-1}. Furthermore, adjacent elements in the current row (the blue items in the figure) are dependent on the elements directly above (the red elements) and an \emph{adjacent} set of elements to the left (the green elements). The red elements are stored on the current processor, while the green elements are stored on 1 or 2 other processors.
 
 \begin{figure}
 \begin{centering}
@@ -195,13 +195,13 @@ To compute each element in the dynamic programming matrix, the algorithm must ta
 \end{centering}
 \end{figure}
 
-In a naive implementation, CPU 2 would read each green element one at a time to compute the blue items. This results in many network accesses and is therefore slow. Instead, the entire green block of data is copied into a local temporary buffer, using one or two UPC \emph{memget} operations. CPU 2 therefore accesses the network at most twice, instead of once for each element, making it much faster.
+In a naive implementation, CPU 2 would read each green element separately to compute each blue item. This results in many network accesses and is therefore slow. Instead, the entire green block of data is copied into a local temporary buffer, using one or two UPC \emph{memget} operations. CPU 2 therefore accesses the network at most twice, instead of once for each element, reducing latency significantly.
 
 \subsection{Synchronizing via Spin-Locks}
 
-Computing any row of $T$ requires the values from the previous row. The straightforward implementation uses a upc\_barrier statement to ensure that all threads have completed calculating the previous row before we begin calculating the current row. However, barriers incur significant overhead because they require the coordination of every running thread. By noticing that each individual element in $T$, $T[w,c]$, is dependent upon only a small number of other elements, $T[w,c-1]$ and $T[w-w_c,c-1]$, we can replace the course upc\_barrier statement with a finer synchronization primitive that only requires coordination between dependent threads. We let the computation for $T[w,c]$ proceed as soon as $T[w,c-1]$ and $T[w-w_c,c-1]$ are finished computing.
+Computing any row of $T$ requires the values from the previous row. The straightforward implementation uses a \emph{upc\_barrier} statement to ensure that all threads have completed calculating the previous row before we begin calculating the current row. However, barriers incur significant overhead because they require the coordination of every running thread. By noticing that each individual element in $T$, $T[n,c]$, is dependent upon only a small number of other elements, $T[n-1,c]$ and $T[n-1,c-w_n]$, we can replace the coarse \emph{upc\_barrier} statement with a finer synchronization primitive that only requires coordination between dependent threads. We let the computation for $T[n,c]$ proceed as soon as $T[n-1,c]$ and $T[n-1,c-w_n]$ are finished computing.
 
-To keep track of the progress of each thread, we use a shared 1$\times$THREADS \emph{progress} array. Each element in \emph{progress} indicates the last row of $T$ that has finished computing. Thus before computing $T[w,c]$ we check whether \emph{progress}$[t] \geq c-1$, where $t$ is the thread responsible for computing $T[w-w_c,c-1]$, and otherwise wait using a spin-lock. To prevent the UPC compiler from optimizing away the spin-lock, \emph{progress} must be declared as \emph{volatile}.
+To keep track of the progress of each thread, we use a one dimensional shared \emph{progress} array of length THREADS. Each element in \emph{progress} indicates the last row that that thread has finished computing. Thus, before computing $T[n,c]$, we check whether \emph{progress}$[t] \geq n-1$, where $t$ is the thread responsible for computing $T[n-1,c-w_n]$, otherwise we wait using a spin-lock. To prevent the UPC compiler from optimizing away the spin-lock, \emph{progress} must be declared as \emph{volatile}.
 
 \section{Results}
 
@@ -215,7 +215,11 @@ To keep track of the progress of each thread, we use a shared 1$\times$THREADS \
 \end{centering}
 \end{figure}
 
-Figure \ref{TvsP} shows how the execution time scales with the number of processors for a number of different problem sizes. We see that there is significant communication overhead from running across multiple processors, as when problem sizes are too small ($C = 7999$) execution time actually \emph{increases} with the number of processors. As problem sizes increase, additional processors decrease execution time. In the case of $C = 63999$, we achieve a 64\% parallelization efficiency as the number of processors increase from 1 to 4. At $P = 5$, we see a sharp bump up in execution times due to the additional overhead of internode communication.
+Figure \ref{TvsP} shows how the execution time scales with the number of processors. Different curves correspond to different problem sizes. For the two largest problem sizes, execution time decreases with additional processors. In the case of $C = 63999$, we achieve a 64\% parallelization efficiency as the number of processors increase from 1 to 4. For more than eight processors, diminishing speedups are achieved for each additional processor.
+
+For small problem sizes, execution time actually \emph{increases} with the number of processors. This is due to the increase in communication and synchronization costs as more processors are added. The amount of computation per processor is so small that the majority of the execution time is dominated by the communication and synchronization.
+
+For $P < 4$, all the communication is on chip. Therefore at $P = 5$, we see a sharp bump up in execution times due to the additional overhead of internode communication. 
 
 \subsection{Weak Scaling}
 
@@ -227,7 +231,7 @@ Figure \ref{TvsP} shows how the execution time scales with the number of process
 \end{centering}
 \end{figure}
 
-Figure \ref{TvsP-fixed} shows how the execution time scales with the number of processors for a fixed problem size $C/P = 2000$. Under 100\$ parallelization efficiency, the curve should be flat, whereas in our case the curve starts with a relatively high slope and then flattens out as the number of processors increase. The increase in execution time from $P = 1$ to $P = 4$ is due to the additional overhead of intercore communication and synchronization. The increase in execution time from $P = 4$ to $P = 8$ is due to the additional overhead of internode communication and synchronization. After $P = 8$ the curve is nearly flat, with the remaining overhead due to the propagation of information from capacity $c = 0$ to $c = C$.
+Figure \ref{TvsP-fixed} shows how the execution time scales with the number of processors for a fixed problem size $C/P = 2000$. Under 100\% parallelization efficiency, the curve should be flat, whereas in our case the curve starts with a relatively high slope and then flattens out as the number of processors increase. The increase in execution time from $P = 1$ to $P = 4$ is due to the additional overhead of intercore communication and synchronization. The increase in execution time from $P = 4$ to $P = 8$ is due to the additional overhead of internode communication and synchronization. After $P = 8$ the curve is nearly flat demonstrating good weak scaling.
 
 \subsection{Time versus Problem Size}
 
@@ -239,7 +243,7 @@ Figure \ref{TvsP-fixed} shows how the execution time scales with the number of p
 \end{centering}
 \end{figure}
 
-How does solution time vary for fixed number of processors, when problem sized increased. Shows figure 2, and explain.
+Figure \ref{TvsC} shows how the execution time scales with the capacity. Different curves correspond to execution on varying numbers of processors. We see that from $P = 1$ to $P = 8$, the execution time increases linearly with the capacity, as expected. The decreasing slopes reflect the increasing costs of communication and synchronization versus per-node computation. In case of $P = 32$, the execution time decreases as capacity increases. Since there are 32 processors, the amount of data stored locally is very small when the capacity is small. This may cause incorrect synchronizations between processors resulting in the unexpected behavior.
 
 \subsection{Effect of Optimizations on Performance}
 
