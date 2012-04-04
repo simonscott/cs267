@@ -187,7 +187,9 @@ memget, rather than reading each element separately.
 
 \subsection{Synchronizing via Spin-Locks}
 
-Use progress array as spin-lock to avoid costly upc\_barrier operation. Lock must be declared volatile.
+Computing any row of $T$ requires the values from the previous row. The straightforward implementation uses a upc\_barrier statement to ensure that all threads have completed calculating the previous row before we begin calculating the current row. However, barriers incur significant overhead because they require the coordination of every running thread. By noticing that each individual element in $T$, $T[w,c]$, is dependent upon only a small number of other elements, $T[w,c-1]$ and $T[w-w_c,c-1]$, we can replace the course upc\_barrier statement with a finer synchronization primitive that only requires coordination between dependent threads. We let the computation for $T[w,c]$ proceed as soon as $T[w,c-1]$ and $T[w-w_c,c-1]$ are finished computing.
+
+To keep track of the progress of each thread, we use a shared 1$\times$THREADS \emph{progress} array. Each element in \emph{progress} indicates the last row of $T$ that has finished computing. Thus before computing $T[w,c]$ we check whether \emph{progress}$[t] \geq c-1$, where $t$ is the thread responsible for computing $T[w-w_c,c-1]$, and otherwise wait using a spin-lock. To prevent the UPC compiler from optimizing away the spin-lock, \emph{progress} must be declared as \emph{volatile}.
 
 \section{Results}
 
