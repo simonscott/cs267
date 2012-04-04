@@ -4,13 +4,11 @@
 #include <sys/time.h>
 #include <upc.h>
 
-//#pragma upc strict
-
-
 //
 // Constant Definitions
 //
-#define CAPACITY    1999
+#define CAPACITY    999
+//#define CAPACITY 31999
 #define NITEMS      16000
 
 #define BLK_WIDTH   ((CAPACITY+1+THREADS-1) / THREADS)
@@ -155,21 +153,17 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
         scratch_end_col = min( max(0, start_col - l_weight[i] + BLK_WIDTH) , start_col);  // end is exclusive
         boundary_col = min( (scratch_start_col / BLK_WIDTH + 1) * BLK_WIDTH, scratch_end_col );
 
-//        for(j=scratch_start_col; j < scratch_end_col; j++)
-//            scratch[j-scratch_start_col] = s_old_row[j];
-
+        /*
+        for(j=scratch_start_col; j < scratch_end_col; j++)
+            scratch[j-scratch_start_col] = s_old_row[j];
+        */
+        
         upc_memget(scratch, &s_old_row[scratch_start_col], (boundary_col - scratch_start_col)*sizeof(int));
         upc_memget(&scratch[boundary_col - scratch_start_col], &s_old_row[boundary_col], (scratch_end_col - boundary_col)*sizeof(int));
 
         upc_memget(scratch_cnt, &s_old_cnt[scratch_start_col], (boundary_col - scratch_start_col)*sizeof(int));
         upc_memget(&scratch_cnt[boundary_col - scratch_start_col], &s_old_cnt[boundary_col], (scratch_end_col - boundary_col)*sizeof(int));
-/*
-        upc_memget(scratch, &s_old_row[scratch_start_col], 1*sizeof(int));
-        upc_memget(&scratch[boundary_col - scratch_start_col], &s_old_row[boundary_col], 1*sizeof(int));
-
-        upc_memget(scratch_cnt, &s_old_cnt[scratch_start_col], 1*sizeof(int));
-        upc_memget(&scratch_cnt[boundary_col - scratch_start_col], &s_old_cnt[boundary_col], 1*sizeof(int));
-*/
+      
         // Iterate through all columns belonging to this thread
         // Note: the last thread does some extra work on non-existent columns
         for(j = 0; j < BLK_WIDTH; j++)
@@ -212,7 +206,8 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
         s_progress[MYTHREAD] = i;
 
         // Sync all threads
-        //upc_barrier;
+        // upc_barrier;
+        
         if(i == nitems - 1)
             upc_barrier;
         else
@@ -231,6 +226,7 @@ int solve_upc(  int nitems, int cap, sintptr_cblk s_old_row, sintptr_cblk s_new_
             while(s_progress[t3] < i) ;
             while(s_progress[t4] < i) ;
         }
+        
 
         // Swap new and old rows
         temp_intptr = l_old_row;
@@ -400,7 +396,7 @@ int main( int argc, char** argv )
         
         compute_serial(NITEMS, CAPACITY, l_weight, l_value, &nused_serial, &serial_total_weight, &best_value_serial);
         
-        printf("Serial: %d items used, value %d, weight %d\n", nused, best_value_serial, serial_total_weight );
+        printf("Serial: %d items used, value %d, weight %d\n", nused_serial, best_value_serial, serial_total_weight );
         
         // Print UPC solution
         printf( "%d items used, value %d, weight %d\n", nused, best_value, total_weight );

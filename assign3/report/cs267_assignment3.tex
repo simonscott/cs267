@@ -249,14 +249,14 @@ Figure \ref{TvsC} shows how the execution time scales with the capacity. Differe
 
 \subsubsection{Bulk Memory Copies}
 
-Give \% speed increase for a single P, C, N combination.
+For a problem size of $C = 31999, N = 16000$ running on 16 processors, adding the bulk memory copy optimization reduces the execution time from 198 seconds to 2.27 seconds. This gives a 87 times speedup.
 
 \subsubsection{Synchronizing via Spin-Locks}
 
-Give \% speed increase for a single P, C, N combination.
+For a problem size of $C = 31999, N = 16000$ running on 16 processors, adding the spin-lock optimization reduces the execution time from 3.6269 seconds to 2.27 seconds. This gives a 1.6 times speedup.
 
 \section{Conclusion}
 
-TODO
+We have developed a parallel implementation of dynamic programming using UPC to solve the 0-1 knapsack problem. We show that our implementation demonstrates both strong and weak scaling. The main optimizations used were column blocking, elimination of backtracking, bulk memory copies, and spin-lock synchronizations. These lead to a significant increase in performance.
 
 \end{document}
