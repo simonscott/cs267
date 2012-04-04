@@ -164,7 +164,9 @@ Exiting Race Detection 0.9.18...
 
 \section{Method of Parallelization}
 
-How we parallelized the code. We blocked the columns, with each processor having single set of adjacent columns. Synchronize after each row.
+The dynamic programming matrix, \emph{T}, has NITEMS rows and CAPACITY columns. This matrix is computed in parallel by allocating NITEMS/\emph{P} adjacent columns, to each processor, where \emph{P} is the number of processors. Therefore, non-cyclic column blocking is used to partition the array.
+
+Since each element in the table is dependent on two values in the row immediately above it, the threads are synchronized after computing each row.
 
 \section{Optimization Techniques}
 
@@ -183,7 +185,17 @@ With the above two modifications to the original implementation, we avoid the ba
 
 \subsection{Bulk Memory Copies}
 
-memget, rather than reading each element separately.
+To compute each element in the dynamic programming matrix, the algorithm must take the maximum of two values in the row above. The one element is directly above, while the other is above and to the left. In Figure~\ref{memcpy_diagram}, the yellow element in \emph{Row i} is dependent on the two yellow elements in \emph{Row i-1}. Furthermore, adjacent elements in the current row (the blue items in the figure) are dependent on the elements directly above (the red elements) and an \emph{adjacent} set of elements to left (the green elements). The red elements are stored on the current processor, while the green elements are stored on 1 or 2 other processors.
+
+\begin{figure}
+\begin{centering}
+\includegraphics*[width=0.5\paperwidth, viewport= 70 575 540 720]{figures/memcpy_diagram.pdf}
+\caption{Dependencies between Elements in the Matrix}
+\label{memcpy_diagram}
+\end{centering}
+\end{figure}
+
+In a naive implementation, CPU 2 would read each green element one at a time to compute the blue items. This results in many network accesses and is therefore slow. Instead, the entire green block of data is copied into a local temporary buffer, using one or two UPC \emph{memget} operations. CPU 2 therefore accesses the network at most twice, instead of once for each element, making it much faster.
 
 \subsection{Synchronizing via Spin-Locks}
 
