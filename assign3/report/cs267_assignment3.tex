@@ -65,10 +65,10 @@
 \maketitle
 \parskip 7.2pt
 
-\section{Introduction and Aims}
+\section{Aims}
 The aim of this assignment was to 
 \begin{enumerate}
-  \item find and fix the race condition in the supplied implementation of knapsack using Thrille
+  \item find and fix the race condition in the supplied implementation of knapsack using Thrille, and
   \item develop a correct parallel implementation of dynamic programming to solve the 0-1 knapsack problem that demonstrates weak and strong scaling.
 \end{enumerate}
 
@@ -125,7 +125,7 @@ upc_forall( int i = wj; i <= cap; i++; &T[i] ) T[i] = vj;
 
 \subsection{Explanation of Race Condition}
 
-In build\_table, each thread incrementally reads from the weight and value array, starting from the first element, in order to build the T table, one row at a time. However, this assumes (incorrectly) that the weight and value array has been properly initialized. weight[0] and value[0] is initialized by thread 0 (MYTHREAD == 0). Incorrect behavior results from thread 1 reads from weight[0] and value[0] before they are initialized by thread 0.
+In build\_table, each thread incrementally reads from the weight and value array, starting from the first element, in order to build the T table, one row at a time. However, this assumes, incorrectly, that the weight and value array has been properly initialized. weight[0] and value[0] is initialized by thread 0 (MYTHREAD == 0). Incorrect behavior results from thread 1 reads from weight[0] and value[0] before they are initialized by thread 0.
 
 \subsection{Fix for Race Condition}
 We can prevent the race condition by using a upc\_barrier statement to ensure that the weight and value array is initialized before calling build\_table. 
@@ -171,13 +171,13 @@ How we parallelized the code. We blocked the columns, with each processor having
 \subsection{Only Store Two Rows}
 A straightforward implementation of dynamic programming to solve the 0-1 knapsack problem constructs and populates a NITEMS $\times$ CAPACITY table, $T$. After populating $T$, the optimal value is found at $T[\text{NITEMS}, \text{CAPACITY}]$. To find the subset of items contained in the knapsack we backtrack along the rows of the table and determine whether each item was included in the knapsack. 
 
-We are interested only in the total weight, value, and the final number of items in the table, and \emph{not} the actual subset of items that were used. Hence, we can save some memory by not storing the entire $T$ table. At any time we only need to store 2 rows of the table, the current row that we are calculating, and the previous row, on which the current row depends on.
+We are interested only in the total weight, value, and the final number of items in the table, and \emph{not} the actual subset of items that were used. Hence, we can save memory by not storing the entire $T$ table. At any time we only need to store 2 rows of the table, the current row that we are calculating, and the previous row, on which the current row depends on.
 
 \subsection{Elimination of Backtracking}
 
-Because the $T$ table is no longer being stored, we can no longer backtrack along the rows of $T$ to determine the final number of items in the knapsack. Instead, we keep track of the number of items used for each weight in a separate 1$\times$C array, \emph{count}. We update \emph{count} during the calculation of $T$. For each item $i$, we may choose to either include it in the knapsack, at which time \emph{count}$_i$ is incremented, or we may choose to exclude it from knapsack, keeping \emph{count}$_i$ is unmodified. 
+Backtracking along each row of $T$ to determine the final number of items in the knapsack is expensive. Instead, we keep track of the number of items used for each weight in a separate 1$\times$C array, \emph{count}, and update \emph{count} during the calculation of $T$. For each item $i$, we may choose to either include it in the knapsack, at which time \emph{count}$_i$ is incremented, or we may choose to exclude it from knapsack, keeping \emph{count}$_i$ unmodified.
 
-To compute the final weight in the knapsack, we look in the last row of $T$ for the last column at which an item was added to the knapsack. I.e. we look for the largest weight i, at which $T[\text{NITEMS}, i] > T[\text{NITEMS}, i-1]$.
+Because all items have a positive value, the total value in the knapsack changes with each additional item included. Therefore, the final weight in the knapsack can be computed by looking, in the last row of $T$, for the last column at which the total value changes. I.e. we look for the largest weight i, at which $T[\text{NITEMS}, i] > T[\text{NITEMS}, i-1]$.
 
 With the above two modifications to the original implementation, we avoid the backtracking phase of the computation.
 
@@ -193,13 +193,37 @@ Use progress array as spin-lock to avoid costly upc\_barrier operation. Lock mus
 
 \subsection{Strong Scaling}
 
+\begin{figure}
+\begin{centering}
+\includegraphics[width=0.5\paperwidth]{figures/TvsP.pdf}
+\caption{Time versus Number of Processors}
+\label{TvsP}
+\end{centering}
+\end{figure}
+
 How does time vary with number of processors, for fixed global problem size. Show figure 1, and explain.
 
 \subsection{Weak Scaling}
 
+\begin{figure}
+\begin{centering}
+\includegraphics[width=0.5\paperwidth]{figures/TvsP-fixed.pdf}
+\caption{Time versus Number of Processors for a Fixed C/P}
+\label{TvsP-fixed}
+\end{centering}
+\end{figure}
+
 How does solution time vary with number of processors, for fixed per-processor problem size. Show figure 3, and explain.
 
 \subsection{Time versus Problem Size}
+
+\begin{figure}
+\begin{centering}
+\includegraphics[width=0.5\paperwidth]{figures/TvsC.pdf}
+\caption{Time versus Capacity for N = 16000}
+\label{TvsC}
+\end{centering}
+\end{figure}
 
 How does solution time vary for fixed number of processors, when problem sized increased. Shows figure 2, and explain.
 
