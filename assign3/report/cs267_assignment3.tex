@@ -203,7 +203,7 @@ To keep track of the progress of each thread, we use a shared 1$\times$THREADS \
 \end{centering}
 \end{figure}
 
-How does time vary with number of processors, for fixed global problem size. Show figure 1, and explain.
+Figure \ref{TvsP} shows how the execution time scales with the number of processors for a number of different problem sizes. We see that there is significant communication overhead from running across multiple processors, as when problem sizes are too small ($C = 7999$) execution time actually \emph{increases} with the number of processors. As problem sizes increase, additional processors decrease execution time. In the case of $C = 63999$, we achieve a 64\% parallelization efficiency as the number of processors increase from 1 to 4. At $P = 5$, we see a sharp bump up in execution times due to the additional overhead of internode communication.
 
 \subsection{Weak Scaling}
 
@@ -215,7 +215,7 @@ How does time vary with number of processors, for fixed global problem size. Sho
 \end{centering}
 \end{figure}
 
-How does solution time vary with number of processors, for fixed per-processor problem size. Show figure 3, and explain.
+Figure \ref{TvsP-fixed} shows how the execution time scales with the number of processors for a fixed problem size $C/P = 2000$. Under 100\$ parallelization efficiency, the curve should be flat, whereas in our case the curve starts with a relatively high slope and then flattens out as the number of processors increase. The increase in execution time from $P = 1$ to $P = 4$ is due to the additional overhead of intercore communication and synchronization. The increase in execution time from $P = 4$ to $P = 8$ is due to the additional overhead of internode communication and synchronization. After $P = 8$ the curve is nearly flat, with the remaining overhead due to the propagation of information from capacity $c = 0$ to $c = C$.
 
 \subsection{Time versus Problem Size}
 
